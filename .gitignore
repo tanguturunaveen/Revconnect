@@ -1,0 +1,41 @@
+# Compiled output
+target/
+dist/
+tmp/
+out-tsc/
+bazel-out/
+
+# Node dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Angular
+.angular/
+
+# IDE and Editor files
+.idea/
+*.iml
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.project
+.classpath
+.settings/
+
+# Logs
+*.log
+logs/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Environment / Secrets
+.env
+.env.local
