@@ -1,30 +1,41 @@
 package org.revature.revconnect.service;
 
+import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mail.javamail.JavaMailSender;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class EmailServiceTest {
+
+    @Mock
+    private JavaMailSender mailSender;
+
+    @Mock
+    private MimeMessage mimeMessage;
 
     private EmailService emailService;
 
     @BeforeEach
     void setUp() {
-        emailService = new EmailService();
-        // Inject a dummy API key — actual HTTP call won't be made in unit tests
-        ReflectionTestUtils.setField(emailService, "brevoApiKey", "test-api-key");
+        when(mailSender.createMimeMessage()).thenReturn(mimeMessage);
+        emailService = new EmailService(mailSender);
     }
 
     @Test
-    void sendPasswordResetEmail_withValidInputs_doesNotThrow() {
-        // The @Async method will catch exceptions internally, so it should not throw
-        assertDoesNotThrow(() -> emailService.sendPasswordResetEmail("user@test.com", "123456"));
+    void sendVerificationEmail_callsMailSender() {
+        emailService.sendVerificationEmail("test@example.com", "123456");
+        verify(mailSender, atLeastOnce()).createMimeMessage();
     }
 
     @Test
-    void sendVerificationEmail_withValidInputs_doesNotThrow() {
-        assertDoesNotThrow(() -> emailService.sendVerificationEmail("user@test.com", "654321"));
+    void sendPasswordResetEmail_callsMailSender() {
+        emailService.sendPasswordResetEmail("test@example.com", "654321");
+        verify(mailSender, atLeastOnce()).createMimeMessage();
     }
 }

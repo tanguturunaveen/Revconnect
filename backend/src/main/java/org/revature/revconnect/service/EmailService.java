@@ -1,115 +1,81 @@
 package org.revature.revconnect.service;
 
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
- * EmailService — sends transactional emails via Brevo REST API (HTTPS port 443).
- * This approach works on Render's free tier which blocks outbound SMTP (port 587).
+ * EmailService — sends transactional emails via AWS SES SMTP.
+ * Works on Elastic Beanstalk (EC2 does not block outbound SMTP port 587).
  */
 @Service
 @Slf4j
 public class EmailService {
 
-    private static final String BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
-    private static final String FROM_NAME = "RevConnect";
-    private static final String FROM_EMAIL = "tanguturunaveen2002@gmail.com";
+    private static final String FROM_NAME    = "RevConnect";
+    private static final String FROM_EMAIL   = "tanguturunaveen2002@gmail.com";
 
-    @Value("${brevo.api.key}")
-    private String brevoApiKey;
+    private final JavaMailSender mailSender;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    @Value("${app.mail.from:tanguturunaveen2002@gmail.com}")
+    private String fromEmail;
+
+    public EmailService(JavaMailSender mailSender) {
+        this.mailSender = mailSender;
+    }
 
     /**
-     * Send a password reset OTP email via Brevo API.
+     * Send a password reset OTP email.
      */
     @Async
     public void sendPasswordResetEmail(String toEmail, String otp) {
-        log.info("Attempting to send password reset OTP email to: {}", toEmail);
-
-        String subject = "Your RevConnect Password Reset Code";
+        log.info("Attempting to send password reset OTP to: {}", toEmail);
+        String subject  = "Your RevConnect Password Reset Code";
         String htmlBody = buildHtmlEmail(
                 "Password Reset Request",
                 "You have requested to reset your password. Use the code below to proceed:",
                 otp,
                 "This code is valid for 24 hours. If you did not request this, please ignore this email."
         );
-
-        try {
-            sendViaBrevoApi(toEmail, subject, htmlBody);
-            log.info("Password reset OTP email successfully sent to: {}", toEmail);
-        } catch (Exception e) {
-            log.error("CRITICAL ERROR: Failed to send reset email to {}: {}", toEmail, e.getMessage());
-            log.info("========================================");
-            log.info("FALLBACK OTP (Console): {}", otp);
-            log.info("========================================");
-        }
+        sendEmail(toEmail, subject, htmlBody, otp);
     }
 
     /**
-     * Send an account verification OTP email via Brevo API.
+     * Send an account verification OTP email.
      */
     @Async
     public void sendVerificationEmail(String toEmail, String otp) {
-        log.info("Attempting to send verification OTP email to: {}", toEmail);
-
-        String subject = "Verify Your RevConnect Account";
+        log.info("Attempting to send verification OTP to: {}", toEmail);
+        String subject  = "Verify Your RevConnect Account";
         String htmlBody = buildHtmlEmail(
                 "Welcome to RevConnect!",
                 "To complete your registration, please enter the verification code below:",
                 otp,
                 "This code is valid for 24 hours. If you did not create an account, please ignore this email."
         );
-
-        try {
-            sendViaBrevoApi(toEmail, subject, htmlBody);
-            log.info("Verification OTP email successfully sent to: {}", toEmail);
-        } catch (Exception e) {
-            log.error("CRITICAL ERROR: Failed to send verify email to {}: {}", toEmail, e.getMessage());
-            log.info("========================================");
-            log.info("FALLBACK VERIFY OTP (Console): {}", otp);
-            log.info("========================================");
-        }
+        sendEmail(toEmail, subject, htmlBody, otp);
     }
 
-    /**
-     * Calls Brevo's transactional email REST API over HTTPS (port 443).
-     */
-    private void sendViaBrevoApi(String toEmail, String subject, String htmlBody) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("api-key", brevoApiKey);
-        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
-
-        Map<String, Object> sender = new HashMap<>();
-        sender.put("name", FROM_NAME);
-        sender.put("email", FROM_EMAIL);
-
-        Map<String, String> recipient = new HashMap<>();
-        recipient.put("email", toEmail);
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("sender", sender);
-        body.put("to", List.of(recipient));
-        body.put("subject", subject);
-        body.put("htmlContent", htmlBody);
-
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-
-        ResponseEntity<String> response = restTemplate.postForEntity(BREVO_API_URL, request, String.class);
-
-        if (response.getStatusCode().is2xxSuccessful()) {
-            log.info("Brevo API response: {}", response.getBody());
-        } else {
-            throw new RuntimeException("Brevo API returned status: " + response.getStatusCode() + " body: " + response.getBody());
+    private void sendEmail(String toEmail, String subject, String htmlBody, String otp) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            helper.setFrom(FROM_EMAIL, FROM_NAME);
+            helper.setTo(toEmail);
+            helper.setSubject(subject);
+            helper.setText(htmlBody, true);
+            mailSender.send(message);
+            log.info("Email successfully sent to: {}", toEmail);
+        } catch (Exception e) {
+            log.error("CRITICAL ERROR: Failed to send email to {}: {}", toEmail, e.getMessage());
+            log.info("========================================");
+            log.info("FALLBACK OTP (Console): {}", otp);
+            log.info("========================================");
         }
     }
 
