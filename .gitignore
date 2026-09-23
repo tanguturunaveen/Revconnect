@@ -39,3 +39,7 @@ Desktop.ini
 # Environment / Secrets
 .env
 .env.local
+
+eb-deploy/
+revconnect-eb.zip
+*.log.*.gz
