@@ -1,37 +1,39 @@
 package org.revature.revconnect.service;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
-import java.io.UnsupportedEncodingException;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
+import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * EmailService — sends transactional emails via Brevo REST API (HTTPS port 443).
+ * This approach works on Render's free tier which blocks outbound SMTP (port 587).
+ */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class EmailService {
 
-    private final JavaMailSender mailSender;
-
-    @Value("${spring.mail.username}")
-    private String fromEmail;
-
+    private static final String BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
     private static final String FROM_NAME = "RevConnect";
+    private static final String FROM_EMAIL = "tanguturunaveen2002@gmail.com";
+
+    @Value("${brevo.api.key}")
+    private String brevoApiKey;
+
+    private final RestTemplate restTemplate = new RestTemplate();
 
     /**
-     * Send a password reset email asynchronously using Gmail SMTP with HTML content.
-     *
-     * @param toEmail recipient email address
-     * @param otp     the 6-digit OTP
+     * Send a password reset OTP email via Brevo API.
      */
     @Async
     public void sendPasswordResetEmail(String toEmail, String otp) {
-        log.info("Attempting to send real OTP email to: {}", toEmail);
+        log.info("Attempting to send password reset OTP email to: {}", toEmail);
 
         String subject = "Your RevConnect Password Reset Code";
         String htmlBody = buildHtmlEmail(
@@ -42,10 +44,10 @@ public class EmailService {
         );
 
         try {
-            sendHtmlEmail(toEmail, subject, htmlBody);
-            log.info("OTP email successfully sent to: {}", toEmail);
+            sendViaBrevoApi(toEmail, subject, htmlBody);
+            log.info("Password reset OTP email successfully sent to: {}", toEmail);
         } catch (Exception e) {
-            log.error("CRITICAL ERROR: Failed to send real email to {}: {}", toEmail, e.getMessage());
+            log.error("CRITICAL ERROR: Failed to send reset email to {}: {}", toEmail, e.getMessage());
             log.info("========================================");
             log.info("FALLBACK OTP (Console): {}", otp);
             log.info("========================================");
@@ -53,14 +55,11 @@ public class EmailService {
     }
 
     /**
-     * Send an account verification email asynchronously using Gmail SMTP with HTML content.
-     *
-     * @param toEmail recipient email address
-     * @param otp     the 6-digit OTP
+     * Send an account verification OTP email via Brevo API.
      */
     @Async
     public void sendVerificationEmail(String toEmail, String otp) {
-        log.info("Attempting to send Verification OTP email to: {}", toEmail);
+        log.info("Attempting to send verification OTP email to: {}", toEmail);
 
         String subject = "Verify Your RevConnect Account";
         String htmlBody = buildHtmlEmail(
@@ -71,7 +70,7 @@ public class EmailService {
         );
 
         try {
-            sendHtmlEmail(toEmail, subject, htmlBody);
+            sendViaBrevoApi(toEmail, subject, htmlBody);
             log.info("Verification OTP email successfully sent to: {}", toEmail);
         } catch (Exception e) {
             log.error("CRITICAL ERROR: Failed to send verify email to {}: {}", toEmail, e.getMessage());
@@ -81,17 +80,37 @@ public class EmailService {
         }
     }
 
-    private void sendHtmlEmail(String toEmail, String subject, String htmlBody) throws MessagingException, UnsupportedEncodingException {
-        MimeMessage mimeMessage = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
-        helper.setFrom(fromEmail, FROM_NAME);
-        helper.setTo(toEmail);
-        helper.setSubject(subject);
-        helper.setText(htmlBody, true);
-        helper.setReplyTo(fromEmail);
-        mimeMessage.addHeader("X-Priority", "1");
-        mimeMessage.addHeader("List-Unsubscribe", "<mailto:" + fromEmail + "?subject=unsubscribe>");
-        mailSender.send(mimeMessage);
+    /**
+     * Calls Brevo's transactional email REST API over HTTPS (port 443).
+     */
+    private void sendViaBrevoApi(String toEmail, String subject, String htmlBody) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("api-key", brevoApiKey);
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+
+        Map<String, Object> sender = new HashMap<>();
+        sender.put("name", FROM_NAME);
+        sender.put("email", FROM_EMAIL);
+
+        Map<String, String> recipient = new HashMap<>();
+        recipient.put("email", toEmail);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("sender", sender);
+        body.put("to", List.of(recipient));
+        body.put("subject", subject);
+        body.put("htmlContent", htmlBody);
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+
+        ResponseEntity<String> response = restTemplate.postForEntity(BREVO_API_URL, request, String.class);
+
+        if (response.getStatusCode().is2xxSuccessful()) {
+            log.info("Brevo API response: {}", response.getBody());
+        } else {
+            throw new RuntimeException("Brevo API returned status: " + response.getStatusCode() + " body: " + response.getBody());
+        }
     }
 
     private String buildHtmlEmail(String heading, String message, String otp, String footer) {
@@ -101,7 +120,6 @@ public class EmailService {
                 "<table width='100%' cellpadding='0' cellspacing='0' style='background:#0f0a1a;padding:40px 0;'>" +
                 "<tr><td align='center'>" +
 
-                // Logo & Brand Header
                 "<table width='520' cellpadding='0' cellspacing='0' style='margin-bottom:0;'>" +
                 "<tr><td style='text-align:center;padding:24px 0 20px;'>" +
                 "<div style='display:inline-block;background:linear-gradient(135deg,#8b5cf6,#6366f1,#3b82f6);width:56px;height:56px;border-radius:16px;line-height:56px;text-align:center;box-shadow:0 8px 32px rgba(139,92,246,0.4);'>" +
@@ -111,54 +129,28 @@ public class EmailService {
                 "<span style='color:#8b5cf6;'>Rev</span><span style='color:#ffffff;'>Connect</span></p>" +
                 "</td></tr></table>" +
 
-                // Main Card
-                "<table width='520' cellpadding='0' cellspacing='0' style='background:#1a1425;border-radius:20px;border:1px solid rgba(139,92,246,0.15);box-shadow:0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(139,92,246,0.08);overflow:hidden;'>" +
-
-                // Gradient Accent Bar
+                "<table width='520' cellpadding='0' cellspacing='0' style='background:#1a1425;border-radius:20px;border:1px solid rgba(139,92,246,0.15);box-shadow:0 20px 60px rgba(0,0,0,0.5);overflow:hidden;'>" +
                 "<tr><td style='background:linear-gradient(135deg,#8b5cf6,#6366f1,#3b82f6);height:4px;font-size:0;line-height:0;'>&nbsp;</td></tr>" +
-
-                // Heading Section
                 "<tr><td style='padding:36px 40px 0;text-align:center;'>" +
                 "<h1 style='margin:0 0 8px;color:#ffffff;font-size:24px;font-weight:800;letter-spacing:-0.5px;'>" + heading + "</h1>" +
                 "<div style='width:48px;height:3px;background:linear-gradient(90deg,#8b5cf6,#3b82f6);margin:0 auto;border-radius:2px;'></div>" +
                 "</td></tr>" +
-
-                // Body Content
                 "<tr><td style='padding:28px 40px 12px;'>" +
                 "<p style='margin:0 0 24px;color:#c4b5d4;font-size:15px;line-height:1.7;text-align:center;'>" + message + "</p>" +
-
-                // OTP Code Box
                 "<div style='text-align:center;margin:0 0 28px;'>" +
                 "<div style='display:inline-block;background:linear-gradient(135deg,rgba(139,92,246,0.12),rgba(99,102,241,0.08));border:1px solid rgba(139,92,246,0.25);border-radius:16px;padding:20px 48px;'>" +
                 "<span style='font-size:36px;font-weight:900;letter-spacing:10px;color:#a78bfa;font-family:monospace;'>" + otp + "</span>" +
                 "</div></div>" +
-
-                // Footer Note
                 "<div style='background:rgba(139,92,246,0.06);border-radius:12px;border:1px solid rgba(139,92,246,0.1);padding:16px 20px;margin-bottom:8px;'>" +
-                "<p style='margin:0;color:#9586a8;font-size:13px;line-height:1.6;text-align:center;'>" +
-                "&#128274; " + footer + "</p>" +
+                "<p style='margin:0;color:#9586a8;font-size:13px;line-height:1.6;text-align:center;'>&#128274; " + footer + "</p>" +
                 "</div>" +
                 "</td></tr>" +
-
-                // Divider
-                "<tr><td style='padding:0 40px;'>" +
-                "<div style='height:1px;background:linear-gradient(90deg,transparent,rgba(139,92,246,0.2),transparent);'></div>" +
-                "</td></tr>" +
-
-                // Brand Footer
+                "<tr><td style='padding:0 40px;'><div style='height:1px;background:linear-gradient(90deg,transparent,rgba(139,92,246,0.2),transparent);'></div></td></tr>" +
                 "<tr><td style='padding:24px 40px 32px;text-align:center;'>" +
                 "<p style='margin:0 0 8px;color:#6b5b7b;font-size:12px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;'>Powered by RevConnect</p>" +
-                "<p style='margin:0 0 16px;color:#4a3d5c;font-size:11px;line-height:1.5;'>Professional Networking &bull; Business Growth &bull; Creator Platform</p>" +
-                "<div style='display:inline-block;'>" +
-                "<a href='#' style='display:inline-block;width:32px;height:32px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.15);border-radius:8px;line-height:32px;text-align:center;text-decoration:none;margin:0 4px;color:#8b5cf6;font-size:14px;'>&#127760;</a>" +
-                "<a href='#' style='display:inline-block;width:32px;height:32px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.15);border-radius:8px;line-height:32px;text-align:center;text-decoration:none;margin:0 4px;color:#8b5cf6;font-size:14px;'>&#9993;</a>" +
-                "<a href='#' style='display:inline-block;width:32px;height:32px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.15);border-radius:8px;line-height:32px;text-align:center;text-decoration:none;margin:0 4px;color:#8b5cf6;font-size:14px;'>&#128279;</a>" +
-                "</div>" +
-                "</td></tr>" +
+                "<p style='margin:0;color:#4a3d5c;font-size:11px;line-height:1.5;'>Professional Networking &bull; Business Growth &bull; Creator Platform</p>" +
+                "</td></tr></table>" +
 
-                "</table>" +
-
-                // Bottom Copyright
                 "<table width='520' cellpadding='0' cellspacing='0'>" +
                 "<tr><td style='text-align:center;padding:20px 0;'>" +
                 "<p style='margin:0;color:#3d2e50;font-size:11px;'>&copy; 2025 RevConnect. All rights reserved.</p>" +
