@@ -3,11 +3,11 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "http://revconnect-env.eba-6f97w3pd.ap-south-1.elasticbeanstalk.com/api/$1"
+      "destination": "https://revconnect-backend.onrender.com/api/$1"
     },
     {
       "source": "/uploads/(.*)",
-      "destination": "http://revconnect-env.eba-6f97w3pd.ap-south-1.elasticbeanstalk.com/uploads/$1"
+      "destination": "https://revconnect-backend.onrender.com/uploads/$1"
     },
     {
       "source": "/(.*)",
